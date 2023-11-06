@@ -599,10 +599,10 @@ The metric can also be used to standardize the **supply**. Considering the follo
 | John             | Enfermeiro             | 25              |
 | Suzan            | Enfermeiro             | 40              |
 
-Nurse = 35 + 25 + 40 =\> 100 weekly hours
+Nurse = 35 + 25 + 40 = 100 weekly hours
 
 Nurse = 100 x 4.345 = 434.5 monthly hours
 
-Nurse = 434.5/126 =\> 3.44 professionals in FTE-40
+Nurse = 434.5/126 = 3.44 professionals in FTE-40
 
 It can be seen that we have 3.44 full-time equivalent nursing professionals, considering a workload of 40 hours per week.
