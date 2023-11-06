@@ -27,27 +27,27 @@ mlp_results <-
 
 arima_results <- 
   arima |> 
-  select(codibge...1, `mae_arima_2019-2020`,
-         `mape_arima_2019-2020`) |> 
+  select(codibge...1, `mae_arima_2019-2021`,
+         `mape_arima_2019-2021`) |> 
   rename(codibge = codibge...1,
-         mape_arima = `mape_arima_2019-2020`,
-         mae_arima = `mae_arima_2019-2020`)
+         mape_arima = `mape_arima_2019-2021`,
+         mae_arima = `mae_arima_2019-2021`)
 
 prophet_results <- 
   prophet |> 
-  select(codibge...1, `mae_prophet_2019-2020`,
-         `mape_prophet_2019-2020`) |> 
+  select(codibge...1, `mae_prophet_2019-2021`,
+         `mape_prophet_2019-2021`) |> 
   rename(codibge = codibge...1,
-         mape_prophet = `mape_prophet_2019-2020`,
-         mae_prophet = `mae_prophet_2019-2020`)
+         mape_prophet = `mape_prophet_2019-2021`,
+         mae_prophet = `mae_prophet_2019-2021`)
 
 ets_results <- 
   ets |> 
-  select(codibge...1, `mae_ets_2019-2020`,
-         `mape_ets_2019-2020`) |> 
+  select(codibge...1, `mae_ets_2019-2021`,
+         `mape_ets_2019-2021`) |> 
   rename(codibge = codibge...1,
-         mape_ets = `mape_ets_2019-2020`,
-         mae_ets = `mae_ets_2019-2020`)
+         mape_ets = `mape_ets_2019-2021`,
+         mae_ets = `mae_ets_2019-2021`)
 
 results <- 
   mlp_results |> 
@@ -66,11 +66,11 @@ results <-
 # MLP presents the best results in most of the regions. 
 # So we will use MLP 
 
-mlp_select <- mlp[,c(2,22:93)]
+mlp_select <- mlp[,c(3,23:106)]
 
 mlp_select <- 
   mlp_select |> 
-  gather(key = "date", value = "birth", 2:73) |> 
+  gather(key = "date", value = "birth", 2:85) |> 
   mutate(birth_s = gsub("/.*","",birth)) |> 
   mutate(birth_s = as.numeric(birth_s),
          birth_s = round(birth_s)) |> 
@@ -91,13 +91,13 @@ mlp_select2 <-
 # Prepare data to create graphs which evaluate projection performance ----------
 
 # ETS
-ets_select <- ets[,c(1,9:81)]
+ets_select <- ets[,c(1,9:93)]
 
 ets_select <- 
   ets_select|>
-  select(-codibge...33) |> 
+  select(-codibge...45) |> 
   rename(ibge = codibge...1) |> 
-  gather(key = "date", value = "birth", 2:73) |> 
+  gather(key = "date", value = "birth", 2:85) |> 
   mutate(birth_s = gsub("/.*","",birth)) |> 
   mutate(birth_s = as.numeric(birth_s),
          birth_s = round(birth_s)) |> 
@@ -113,13 +113,13 @@ ets_select2 <-
 
 # Prophet
 
-prophet_select <- prophet[,c(1,7:79)]
+prophet_select <- prophet[,c(1,7:91)]
 
 prophet_select <- 
   prophet_select|>
-  select(-codibge...31) |> 
+  select(-codibge...43) |> 
   rename(ibge = codibge...1) |> 
-  gather(key = "date", value = "birth", 2:73) |> 
+  gather(key = "date", value = "birth", 2:85) |> 
   mutate(birth_s = gsub("/.*","",birth)) |> 
   mutate(birth_s = as.numeric(birth_s),
          birth_s = round(birth_s)) |> 
@@ -135,13 +135,13 @@ prophet_select2 <-
 
 # ARIMA
 
-arima_select <- arima[,c(1,10:82)]
+arima_select <- arima[,c(1,10:94)]
 
 arima_select <- 
   arima_select |>
-  select(-codibge...34) |> 
+  select(-codibge...46) |> 
   rename(ibge = codibge...1) |> 
-  gather(key = "date", value = "birth", 2:73) |> 
+  gather(key = "date", value = "birth", 2:85) |> 
   mutate(birth_s = gsub("/.*","",birth)) |> 
   mutate(birth_s = as.numeric(birth_s),
          birth_s = round(birth_s)) |> 

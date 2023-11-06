@@ -8,7 +8,7 @@ editor: visual
 
 # Introduction
 
-This supplementary material describes the methodological procedures, as well as documents the codes, based on R language, used for the analysis.
+This supplementary material describes the methodological procedures, as well as documents the codes, based on R language, used for this analysis.
 
 We adapted Asamani et al. (2021) orientations in order build a needs-based health workforce planning for Brazilian context.
 
@@ -54,41 +54,6 @@ library(geobr)
 
 The **jurisdictional coverage** was **health regions of Goias state**. Goiás is in the middle-west of Brazil. The objective of analysis was targeted to **registered** **nurse (RN) and physician** **health workforce planning** for **pregnant** and **newborn** in the **primary healthcare (PMC)**. We employed **demand** **forecasts** for the following **two years** using artificial intelligence algorithms.
 
-The following figure illustrates Goiás state's location.
-
-```{r}
-#| warning: false
-
-dataset <- list_geobr()
-
-states <- read_state(
-  year=2019, 
-  showProgress = FALSE
-  ) 
-
-states <- 
-  states |> 
-  mutate(marcar = factor(if_else(abbrev_state == "GO", "1","2")))
-
-# Remove plot axis
-no_axis <- theme(axis.title=element_blank(),
-                 axis.text=element_blank(),
-                 axis.ticks=element_blank())
-
-# Plot all Brazilian states
-
-cores = c("lightblue","lightgray")
-
-a <- states |> 
-      ggplot() +
-        geom_sf(aes(fill=marcar), color="#2D3E50", size=.15, show.legend = FALSE) +
-        theme_minimal() +
-        scale_fill_manual(values = cores) +
-        no_axis
-
-a
-```
-
 The following figure illustrates the 18 health regions of Goiás state.
 
 ![](imagens/mapa%20-%20regiões%20de%20saúde.png){fig-align="center" width="536"}
@@ -98,7 +63,7 @@ The following figure illustrates the 18 health regions of Goiás state.
 Each pregnant will require a set of services during pregnancy and after delivery according to recommendation of Brazilian Minister of Health. The same happens for the baby as soon as it is born.
 
 $$
-NHS\underset{r,t}{} = SD\underset{r,t}{} \times (H\underset{r,t}{} \times \sum_{t = 0}^{32}L\underset{y,t}{}) 
+NHS\underset{r,t}{} = SD\underset{r,t}{} \times (H\underset{r,t}{} \times \sum_{t = 1}^{32}L\underset{y,t}{}) 
 $$ {#eq-1}
 
 where:
@@ -117,8 +82,10 @@ The following chunk shows the number of monthly births for each health region.
 
 #reading and selecting variables
 predictions <- read_excel("~/GitHub/human_resource_health/03_hrh_model/data/live_births_projectios_mlp.xlsx") |> 
-               select(reg, complete_date, birth_s) |> 
-               rename(ibge = reg, qtt = birth_s)
+               select(ibge, date, complete_date, birth_s) |> 
+               rename(qtt = birth_s) |> 
+               mutate(date = as.character(complete_date)) |> 
+               filter(qtt != "NA")
 
 # reading health insurance data
 health_insurance <- read_csv("~/GitHub/human_resource_health/03_hrh_model/data/beneficiarios_plano_saude.csv") |>  
@@ -136,20 +103,16 @@ glimpse(predictions)
 
 ```
 
-<br>
-
-Number of monthly births according to health region.
-
 ```{r}
-
 predictions |> 
-  ggplot(aes(x = complete_date, y = sus_qtt)) + geom_line() + 
-  facet_wrap(~regiao_saude, scales = "free",
-             ncol = 4) + theme_minimal()
-
+  filter(complete_date < "2025-01-01") |> 
+  ggplot(aes(x = complete_date, y = sus_qtt)) + 
+  geom_line() + facet_wrap(~regiao_saude, scales = "free") +
+  theme_minimal() + xlab("Date") + ylab("SUS quantity")
+  
 ```
 
-### 2.2. Estimating services (S)
+### 2.2. Estimating services (L)
 
 For each birth we quantified the number and types of procedures needed to assist pregnant women and the newborn in the primary health care (PHC) setting.
 
@@ -157,40 +120,57 @@ There is a technical note - produced for SUS - which describes the type and freq
 
 [![](imagens/nota.png){fig-align="center" width="324"}](https://www.conass.org.br/biblioteca/saude-da-mulher-na-gestacao-parto-e-puerperio/)
 
-The number and variety of health procedures needed for each pregnant were calculated using an API developed for this project. The API reads the number of births in a given health region (variable `ibge`) according to the variable `qtd_sus` and calculates the number of procedures for previous and subsequent months for pregnant women and newborn.
+The number and variety of health procedures needed for each pregnant were calculated using an API developed for this project. The API reads the number of births in a given health region (variable `ibge`) according to the variable `sus_qtt` and calculates the number of procedures for previous and subsequent months for each pregnant women and newborn.
 
 ```{r include=FALSE}
 #| echo: false
 #| warning: false
 
-services <- vroom::vroom("servicos_correto.csv") |> 
-                select(-`...1`) 
+services <- read_excel("data/services_2025.xlsx") 
 
 glimpse(services)
+
+services <- services |> 
+              select(ibge, regiao, data, qtd, 
+                     procedimento, mes, mês_procedimento_realizado, 
+                     codigo_sigtap, parametro, tipo_procedimento,
+                     Público, nivel_atencao) |> 
+              rename(health_region = regiao, date = data, 
+                     sus_qtt = qtd, procedure = procedimento, 
+                     month_performed = mês_procedimento_realizado, 
+                     sigtap = codigo_sigtap, parameter = parametro, 
+                     month = mes, type = tipo_procedimento, 
+                     target_public = Público, 
+                     level_service = nivel_atencao)
 
 ```
 
 ```{r}
 #| eval: false
+
+services <- tibble::data_frame()
+
 for(i in 1:nrow(predictions)){
   row <- predictions[i,]
   url = paste("http://200.137.215.27:5025/calcula_procedimentos?mes_ano=", 
-              substring(row$data, 1, 7), 
+              substring(row$date, 1, 7), 
               "&nascidos_vivos=", 
-              round(row$qtd_sus, 0), sep = '')
+              round(row$sus_qtt, 0), sep = '')
   temp <- fromJSON(url)
-  temp$data <- row$data
-  temp$qtd <- row$qtd_sus
-  temp$ibge <- row$codibge
+  temp$ibge <- row$ibge
+  temp$regiao <- row$regiao_saude
+  temp$data <- row$date
+  temp$qtd <- row$sus_qtt
+
   
-  servicos <- rbind(temp, servicos)
+  services <- rbind(temp, services)
   
   print(paste("Chamando:",url))
 }
 
 ```
 
-This dataframe has 11 variables
+This dataframe has 13 variables
 
 ```{r}
 colnames(services)
@@ -200,25 +180,27 @@ where:
 
 -   ibge: code that identifies each health region
 
--   data: date of birth
+-   health_region: name of the health region
 
--   qtd: number of births
+-   date: date of birth
 
--   procedimento: name of the procedure of type y
+-   sus_qtt (H x SD): number of births of SUS depedent population
 
--   mês_procedimento_realizado: month when procedure of type y is programmed to be performed
+-   procedure (L): name of the procedure of type y
 
--   codigo_sigtap: code used by SUS to identify the procedure of type y
+-   month: programmed month of procedure, which varies from 1 (second month of gestation) to 32 (child consultation in the 24th month of life). Zero represents the month of birth.
 
--   parametro: the number of procedures of type y is needed according in a given month (mes)
+-   month_performed: month when procedure of type y is programmed to be performed
 
--   mes: programmed month of procedure, which varies from -8 (second month of gestation) to 36 (child consultation in the 36th month of life). Zero represents the month of birth.
+-   sigtap: code used by SUS to identify the procedure of type y
 
--   tipo_procedimento: type of procedure (consultation, vaccine, exam, delivery, educational action)
+-   parameter: the number of procedures of type y is needed according in a given month (month)
 
--   publico: target audienct (mother, newborn, high-risk pregnant woman)
+-   type: type of procedure (consultation, vaccine, exam, delivery, educational action)
 
--   nivel_atencao: level of service (primary care, secondary care)
+-   target_public: target audience (mother, newborn, high-risk pregnant woman)
+
+-   level_service: level of service (primary care, secondary care)
 
     Since our objective is primary care, we filtered only procedures performed in this level of service.
 
@@ -227,7 +209,11 @@ where:
 
 # filter just PHC setting
 phc_services <- services |> 
-                filter(nivel_atencao == "APS")
+                filter(level_service == "APS") |> 
+                filter(month <= 24) |> 
+                mutate(procedure_qtt = sus_qtt * parameter) |> 
+                filter(type == "Consultas ou Visitas" |
+                       type == "Ações Educacionais")
 
 glimpse(phc_services)
 
@@ -239,20 +225,19 @@ According to Asamani e al. (2021), this step includes matching skills and compet
 
 ### 3.1. Matching skills and competencies with interventions needed
 
-The `phc_services` dataframe contains the `codigo_sigtap` variable. This variable represents a procedure and will be used to join with a second dataset which identifies the health professional who are able to perform the procedure.
+The `phc_services` dataframe contains the `sigtap` variable. This variable represents a procedure and will be used to join with a second dataset which identifies the health professional who are able to perform the procedure.
 
 ```{r}
 # loading dataframe which combines procedures and the respective professional
-procedures_professional <- read_excel("~/GitHub/dimensionamento/05_Gestantes/05_python/calendario-procedimentos.xlsx", 
+
+procedures_professional <- read_excel("~/GitHub/human_resource_health/03_hrh_model/data/calendario-procedimentos.xlsx", 
     sheet = "procedimentos_profissionais") |> 
                             select(codigo_sigtap, categoria, CBO) |> 
                             mutate(codigo_sigtap = as.numeric(codigo_sigtap)) 
 
 ```
 
-Procedures performed by two cadres will be split equally among them. Prenatal consultation, for example, can be performed by either RN or physician, so 50% of the procedure volume will be allocated for both professionals.
-
-Mackenzie et al. (2019) introduces a W parameter in the demand equation to represent the proportion of the services made by a given cadre.
+Mackenzie et al. (2019) introduces a W parameter in the demand equation to represent the proportion of the services made by a given cadre. In our case, procedures performed by two cadres will be split equally among them. Prenatal consultation, for example, can be performed by either RN or physician, so 50% of the procedure volume will be allocated for both professionals.
 
 ```{r}
 #| warning: false
@@ -273,10 +258,14 @@ qtt_professional <-
 
 
 professional_services <- phc_services |> 
-                            left_join(qtt_professional, by = "codigo_sigtap") |> 
-                            mutate(qtt_cadre = quantidade/n) |> 
-                            left_join(procedures_professional, by = "codigo_sigtap") |> 
-                            filter(categoria == "Enfermeiro" | categoria == "Médico") 
+                            left_join(qtt_professional, 
+                                      by = c("sigtap" =
+                                             "codigo_sigtap")) |> 
+                            mutate(qtt_cadre = procedure_qtt/n) |> 
+                            left_join(procedures_professional, by = c( "sigtap"="codigo_sigtap")) |> 
+                            filter(categoria == "Enfermeiro" | 
+                                   categoria == "Médico") |> 
+                            rename(cadre = categoria)
 
 glimpse(professional_services)
 
@@ -286,7 +275,7 @@ The new dataframe contains the variables `qtt_cadre`, `categoria` and `CBO`, whe
 
 -   qtt_cadre: total of procedures must be executed by a professional
 
--   categoria: health professional that should execute that number of procedures
+-   cadre: health professional that should execute that number of procedures
 
 -   CBO: brazilian code that identifies a health professional
 
@@ -296,27 +285,27 @@ The next step involves defining the service standard (SS) - the average time, in
 
 $$
 SW\underset{n,y}{} = \frac{AWT{n}{}}{SS{y,n}{}}
-$$
+$$ {#eq-2}
 
-We adapted Asamani's equation for our case study but with no loss to the mathematical logic. On appendix A we present each step made for adapting the original formula.
+We adapted Asamani's equation for our case study but with no loss to the mathematical logic.
 
 After including both elements, the equation 1 is complemented as below:
 
 $$
-N\underset{n,r,t}{} = \frac{SD\underset{r,t}{} \times (H\underset{r,t}{} \times \sum_{t = -8}^{36}(L\underset{y,t}{} \times SS\underset{y}{}))}{AWT\underset{n,t}{}} 
-$$
+N\underset{n,r,t}{} = \frac{SD\underset{r,t}{} \times (H\underset{r,t}{} \times \sum_{t = 1}^{32}(L\underset{y,t}{} \times SS\underset{y}{}))}{AWT\underset{n,t}{}} 
+$$ {#eq-3}
 
 where:
 
--   $N\underset{n,r,t}{}$= Professionals of category n, needed in a given region r and period t.
+-   $N\underset{n,r,t}{}$ is the number of professionals of category n, in FTE40, needed in a given region r and period t.
 
 -   $SD$ represents a percentage of population which dependent of Brazilian Health Unified System (Sistema Único de Saúde - SUS) in a given health region *r* and *t.*
 
 -   $H\underset{r,t}{}$ represents the health status - births - for each month *t* and a region *r*.
 
--   $L\underset{y,t}{}$ represents the number of services of type *y* required for each pregnant or baby in given time *t* before and after the child birth. The index goes from -8 to 36 because each month has programmatic services dedicated to either the pregnant woman (from t = -8 until t = 1). The same happens for the baby, starting from the month it is born t = 0.
+-   $L\underset{y,t}{}$ represents the number of services of type *y* required for each pregnant or baby in given time *t* before and after the child birth. The index goes from 1 to 32 because each month has programmatic services dedicated to either the pregnant woman or the baby.
 
--   $SS\underset{y}{}$ standard time of intervetion, in hours, performed by a trained and motivated professional. We used time collected in past experiences. Using time motion techniques Bonfim et al. (2014) registered that nursing appointments took about 25,3 minutes (Brazil average) in the PHC setting. Educative actions took about 73 minutes. We will use these number as reference. Matsumoto (2017) found similar results in terms of time.
+-   $SS\underset{y}{}$ standard time of intervetion, in hours, performed by a trained and motivated professional. We used time collected in past experiences. Using time motion techniques Bonfim et al. (2014) registered that nursing appointments took about 25,3 minutes (Brazil average) in the PHC setting. Educative actions took about 73 minutes. We will use these number as reference.
 
 -   $AWT\underset{n,t}{}$ is the available working time after deducting absence. Originally this is a metric measured in years. But we adapted it since our analysis are monthly based. We used the AWT available from Bonfim et al. (2014).
 
@@ -325,17 +314,16 @@ The following chunk of code translates the volume of programatic interventions i
 ```{r}
 #| warning: false
 
-demand <- professional_services |> 
-                filter(tipo_procedimento == "Consultas ou Visitas" |
-                       tipo_procedimento == "Ações Educacionais") |> 
-                mutate(ano = year(mês_procedimento_realizado)) |> 
-                filter(ano == 2024) |> 
-                mutate(tempo = if_else(
-                  tipo_procedimento == "Consultas ou Visitas",
+demand_hours <- professional_services |> 
+                mutate(month_performed = as.Date(month_performed)) |> 
+                mutate(year = year(month_performed)) |> 
+                filter(year == 2024) |> 
+                mutate(time_needed = 
+                         if_else(type == "Consultas ou Visitas",
                                         qtt_cadre * 0.66,
                                         qtt_cadre * 1.266))
 
-glimpse(demand)
+glimpse(demand_hours)
 
 ```
 
@@ -344,13 +332,14 @@ The final step translates the number of hours in full-time equivalent (FTE) prof
 ```{r}
 #| warning: false
 
-prof_demand <- demand |> 
-        select(ano, mês_procedimento_realizado, ibge, CBO, categoria, tempo) |> 
-        mutate(fte40 = tempo/133) |> 
-        group_by(ano, mês_procedimento_realizado, ibge, CBO, categoria) |> 
-        summarise(tempo_total = sum(tempo),
-                  fte40_demanda = sum(fte40),
-                  fte40_demanda = round(fte40_demanda, 2))
+prof_demand <- demand_hours |> 
+        select(ibge, year, month_performed, CBO, 
+               cadre, time_needed) |> 
+        mutate(fte40 = time_needed/126) |> 
+        group_by(ibge, month_performed, year, CBO, cadre) |> 
+        summarise(total_time = sum(time_needed),
+                  fte40_demand = sum(fte40),
+                  fte40_demand = round(fte40_demand, 2))
 
 glimpse(prof_demand)
 
@@ -383,51 +372,31 @@ demanda_py <- cegonha_go |>
 
 ```
 
-Asamani et al (2021) incorporates a last element which is the indirect activity rate. We will apply this element on the supply side, following Mackenzie et al. (2019) steps. Furthermore, these numbers represent the total number of FTE professional needed to work only on pregnant and newborn care.
+Asamani et al (2021) incorporates a last element which is the indirect activity rate. We will apply this element on the supply side, following Mackenzie et al. (2019) steps. Furthermore, these numbers represent the total number of FTE professional needed to work in a minimal set of procedures during pregnancy and newbord assistance.
 
 # 4 - Exploring resource implications
 
 During this step we compared the demand for health professional, calculated in the previous stages, and the supply available in a given region.
 
 ```{r}
-#| echo: false
 #| warning: false
 
-oferta_GO <- vroom::vroom("oferta_go.csv") |> select(-`...1`)
-
-```
-
-```{r}
-#| warning: false
-#| eval: false
-
-dremio_host <- Sys.getenv("endereco")
-dremio_port <- Sys.getenv("port")
-dremio_uid <- Sys.getenv("uid")
-dremio_pwd <- Sys.getenv("datalake")
-
-channel <- odbcDriverConnect(sprintf("DRIVER=Dremio Connector;HOST=%s;PORT=%s;UID=%s;PWD=%s;AUTHENTICATIONTYPE=Basic Authentication;CONNECTIONTYPE=Direct", dremio_host, dremio_port, dremio_uid, dremio_pwd))
-
-consulta <- 'SELECT * FROM "Analytics Layer".Infraestrutura.Profissionais."Profissionais APS"'
-
-oferta_GO <- sqlQuery(channel, consulta, 
-                      as.is = TRUE)
+supply <- read_csv("~/GitHub/human_resource_health/03_hrh_model/data/supply.csv")
 
 ```
 
 We will deduce the supply considering only the workload performed to assist pregnant and newborn care.
 
-We used a proxy number according to the volume of consultation for pregnant and newborn care in the SISAB.
+We used a proxy number according to the volume of consultation for pregnant and newborn care in the information system for primary care (SISAB).
 
 ```{r}
 
-producao_SISAB <- read_excel("producao_SISAB.xls") |> 
+sisab <- read_excel("~/GitHub/human_resource_health/03_hrh_model/data/producao_SISAB.xls") |> 
                       select(Cod_Regiao_Saude, Porcentagem)
 
-producao_SISAB$Cod_Regiao_Saude = as.character(producao_SISAB$Cod_Regiao_Saude)
 ```
 
-## Transforming supply data
+## 4.1. Transforming supply data
 
 $$
 S\underset{n,r,t}{} = A\underset{n,r,t}{} \times D\underset{n,r,t}{} \times F\underset{n,r,t}{}
@@ -443,124 +412,128 @@ We also deduct the percentage dedicated exclusively to activities to assist preg
 
 ```{r}
 
-oferta <- oferta_GO |> 
-  mutate(cod_regsaud = as.character(cod_regsaud)) |> 
-  mutate(ano_mes = ym(COMPETEN)) |> 
-  mutate(horas = HORAOUTR + HORAHOSP + HORA_AMB) |> 
-  mutate(prof = if_else(substr(CBO, 1, 4) == "2235", "Enfermeiro", "Médico")) |> 
-  group_by(uf, cod_regsaud, regiao_saude, prof, ano_mes) |> 
-  summarise(horas = 4 * sum(horas)) |> 
-  left_join(producao_SISAB, by = c("cod_regsaud"="Cod_Regiao_Saude")) |> 
-  mutate(fte40 = horas/133) |> 
-  mutate(direto = if_else(prof == "Enfermeiro",
-                          fte40 * 0.30,
-                          fte40 * 0.39)) |> 
-  mutate(liquido = direto * Porcentagem) |> 
-  mutate(ano_mes_corrigido = ano_mes + years(2)) |> 
-  select(-ano_mes) |> 
+supply_GO <- 
+  supply |> 
+  mutate(year_month = ym(COMPETEN)) |> 
+  left_join(sisab, by = c("cod_regsaud"="Cod_Regiao_Saude")) |> 
+  mutate(fte40_supply = CH/126) |> 
+  mutate(direct_supply = if_else(CATEGORIA == "ENFERMEIRO",
+                          fte40_supply * 0.30,
+                          fte40_supply * 0.39)) |> 
+  mutate(net_supply = direct_supply * Porcentagem) |>
+  mutate(year_month = year_month + years(2)) |> 
   mutate(Porcentagem = round(Porcentagem, 2),
-         fte40 = round(fte40, 2),
-         direto = round(direto, 2),
-         liquido = round(liquido, 2))
+         fte40_supply = round(fte40_supply, 2),
+         direct_supply = round(direct_supply, 2),
+         net_supply = round(net_supply, 2)) |> 
+  mutate(CATEGORIA = if_else(CATEGORIA == "ENFERMEIRO",
+                             "Enfermeiro","Médico")) |> 
+  select(year_month, cod_regsaud, regiao_saude,
+         CATEGORIA, CH, Porcentagem, fte40_supply, 
+         direct_supply, net_supply)
 
-DT::datatable(oferta)
+DT::datatable(supply_GO)
 
 ```
 
-# Comparing demand and supply
+## 4.2. Comparing demand and supply
 
 We will now compare demand vs supply for each health region. the `result` metric represents the subtraction between the deduced supply and the demand.
 
 The `perc` metric represents how much supply is currently available to meet, in percentage terms, the total demand needed in the future (2024).
 
 ```{r}
-prof_demand$ibge <- as.character(prof_demand$ibge)
 
-demanda_oferta <- 
+monthly_demand_supply <- 
   prof_demand |>  
-  left_join(oferta, by = c("ibge"="cod_regsaud",
-                           "categoria"="prof",
-                           "mês_procedimento_realizado"="ano_mes_corrigido")) |> 
-  filter(uf != "NA") |> 
-  mutate(ano = year(mês_procedimento_realizado)) |> 
-  mutate(resultado = liquido - fte40_demanda) |> 
-  group_by(ibge, ano, categoria,
-           uf, regiao_saude) |> 
-  summarise(resultado = sum(resultado),
-            demanda = sum(fte40_demanda),
-            oferta = sum(liquido))
+  left_join(supply_GO, by = c("ibge"="cod_regsaud",
+                              "cadre"="CATEGORIA",                          "month_performed"="year_month")) |> 
+  mutate(year = year(month_performed)) |> 
+  mutate(result = net_supply - fte40_demand) |> 
+  mutate(perc = (100 * net_supply)/fte40_demand)
 
-demanda_oferta |> 
-  select(-resultado) |> 
-  gather(key = "demand_supply", value = "resultado", 
-         6:7) |> 
-  mutate(categoria = if_else(categoria == "Enfermeiro","Nurse","Physician"),
-         demand_supply = if_else(demand_supply == "demanda","Demand","Supply")) |> 
-  ggplot(aes(x = fct_reorder(regiao_saude,resultado), y = resultado, fill = demand_supply)) + 
-  geom_col(position = "dodge") + coord_flip() + facet_wrap(~categoria) + 
-  theme_minimal() + xlab("Region") + ylab("Demand vs Supply") +
-  theme(legend.title= element_blank())
+anual_demand_supply <-
+  monthly_demand_supply |> 
+    group_by(ibge, regiao_saude, cadre) |> 
+    summarise(
+      anual_demand = sum(fte40_demand),
+      anual_net_supply = sum(net_supply)) |> 
+    mutate(anual_demand = round(anual_demand, 2),
+           anual_net_supply = round(anual_net_supply, 2)) |> 
+    mutate(abs_result = anual_net_supply - anual_demand,
+           abs_result = round(abs_result, 2)) |> 
+    mutate(perc_result = (100 * anual_net_supply)/anual_demand,
+           perc_result = round(perc_result, 2))
+
+
+DT::datatable(anual_demand_supply)
 
 ```
+
+### 4.2.1. Demand vs Supply - Graph
 
 ```{r}
 
-prof_demand$ibge <- as.character(prof_demand$ibge)
-
-demanda_oferta <- 
-  prof_demand |>  
-  left_join(oferta, by = c("ibge"="cod_regsaud",
-                           "categoria"="prof",
-                           "mês_procedimento_realizado"="ano_mes_corrigido")) |> 
-  filter(uf != "NA") |> 
-  mutate(ano = year(mês_procedimento_realizado)) |> 
-  mutate(resultado = liquido - fte40_demanda) |> 
-  group_by(ibge, ano, categoria,
-           uf, regiao_saude) |> 
-  summarise(resultado = sum(resultado),
-            demanda = sum(fte40_demanda),
-            oferta = sum(liquido)) |> 
-  mutate(resultado = round(resultado, 2)) |> 
-  filter(ano == '2024') |> 
-  mutate(percentage = (oferta * 100)/demanda,
-         percentage = round(percentage, 2)) |> 
-  mutate(id = as.integer(ibge)) |> 
-  ungroup() |> 
-  select(id, regiao_saude, categoria, resultado, percentage)
-
-DT::datatable(demanda_oferta)
-
+anual_demand_supply |> 
+  select(-abs_result, 
+         -perc_result) |> 
+  gather(key = "demand_supply", 
+         value = "resultado", 
+         4:5) |> 
+  mutate(cadre = if_else(
+                    cadre == "Enfermeiro",
+                             "Nurse",
+                             "Physician"),
+         demand_supply = if_else(
+                    demand_supply == "anual_demand","Need","Supply")) |> 
+  ggplot(aes(x = fct_reorder(regiao_saude,
+                             resultado), 
+             y = resultado, 
+             fill = demand_supply)) + 
+  geom_col(position = "dodge") + 
+  coord_flip() + facet_wrap(~cadre) + 
+  theme_minimal() + xlab("Health Region") + 
+  ylab("Demand vs Supply") + 
+  theme(legend.title = element_blank())
 ```
 
-## Map of health regions
+### 4.2.2. Demand vs Supply - Map
 
 We will now ilustrate the results, in terms of percentage, using a map.
 
 ```{r}
 
-spdf <- geojson_read("shape file regioes saude.json",  what = "sp")
+spdf <- geojson_read("data/shape file regioes saude.json",  what = "sp")
 
 ```
+
+The following map illustrates the distribution of professionals by health regions and indicate that all of them have deficit of professionals, with a variation of results from 20% to 50%. In other words, the health region with the best result would need the double of the current professional to provide the minimum services.
 
 ```{r}
 #| warning: false
 
-demanda_oferta$id <- as.integer(demanda_oferta$id)
+anual_demand_supply$ibge <- as.integer(anual_demand_supply$ibge)
 
 spdf_region <- spdf[ spdf@data$est_id == "52" , ]
-
 
 spdf_fortified <- sf::st_as_sf(spdf_region)
 
 spdf_fortified |>
-  left_join(demanda_oferta, by = c("reg_id"="id")) |>
-  mutate(categoria = if_else(categoria == "Médico","Physician","Nurse")) |> 
+  left_join(anual_demand_supply, by = 
+              c("reg_id"="ibge")) |>
+  mutate(cadre = if_else(cadre == 
+                        "Médico",
+                        "Physician","Nurse")) |>
+  rename(percentage = perc_result) |> 
   ggplot() +
   geom_sf(aes(fill = percentage)) +
-  geom_sf_text(aes(label = regiao_saude), size = 2.5) +
+  geom_sf_text(aes(label = regiao_saude), 
+               size = 2.5) +
   theme_minimal() +
-  scale_fill_gradient(low = "#F8766D", high = "#00BA38", n.breaks = 10) +
-  facet_wrap(~categoria, nrow = 1) +
+  scale_fill_gradient(low = "#F8766D", 
+                      high = "#00BA38", 
+                      n.breaks = 10) +
+  facet_wrap(~cadre, nrow = 1) +
   theme(
     axis.line = element_blank(),
     axis.text.x = element_blank(),
@@ -568,409 +541,49 @@ spdf_fortified |>
     axis.ticks = element_blank(),
     axis.title.x = element_blank(),
     axis.title.y = element_blank()
-  ) + ggtitle("Supply vs Demand", "Nurses and Physician for Maternal and Newborn Assistance in the Primary Health Care Context")
+  ) + 
+  ggtitle("Supply vs Demand", "Nurses and Physician for Maternal and Newborn Assistance in the Primary Health Care Context")
 
 ```
 
-# Sensitivy Analysis
+## 4.3. Exploring cost implication
 
-## Função para cálculo de cenários
+The analysis of costs were based only on wages and salaries.
+
+Recently, Brazil Legislative has approved the minimum wage for nursing, which represents R\$ 4.750 each month. Other costs were included, representing nearly R\$ 6.130.
+
+Physicians do not have a legal minimun wage. The Brazilian Ministry of Work and Labour has a database that captures all monthly movements in the labour market. We analysed data from 06/2022 to 06/2023 for Goias states, which resulted in a mean monthly salary of R\$ 8.940. After adding aditional costs, this value represents R\$ 11.532,60.
+
+Using a conversion rate of 4.90 reais (R\$) to each dollar (R\$), the values are:
+
+| Cadre     | Annual Costs (US\$) |
+|-----------|---------------------|
+| Nursing   | 15012.25           |
+| Physician | 28241.63           |
+
+After applying these values to our results, it is possible to capture how much should be invested in order to balance demanda and supply for human resources for health in each health region. 
 
 ```{r}
 
-funcao_demanda_oferta <- function(tempo1, tempo2, perc_direto1, perc_direto2) {
-  professional_services_2 <- phc_services %>%
-    left_join(qtt_professional, by = "codigo_sigtap", suffix = c("_phc", "_qtt")) %>%
-    mutate(qtt_cadre = quantidade / n) %>%
-    left_join(procedures_professional, by = "codigo_sigtap", suffix = c("_phc", "_procedures")) %>%
-    filter(categoria == "Enfermeiro" | categoria == "Médico") %>%
-    filter(tipo_procedimento == "Consultas ou Visitas" | tipo_procedimento == "Ações Educacionais") %>%
-    mutate(ano = year(mês_procedimento_realizado)) %>%
-    filter(ano == 2024) %>%
-    mutate(
-      tempo = if_else(
-        tipo_procedimento == "Consultas ou Visitas",
-        qtt_cadre * tempo1, # 20 minutos
-        qtt_cadre * tempo2
-      )
-    )
-  
-  demanda_2 <- professional_services_2 %>%
-    select(ano, mês_procedimento_realizado, ibge, CBO, categoria, tempo) %>%
-    mutate(fte40 = tempo / 139) %>%
-    group_by(ano, mês_procedimento_realizado, ibge, CBO, categoria) %>%
-    summarise(
-      tempo_total = sum(tempo),
-      fte40_demanda = sum(fte40),
-      fte40_demanda = round(fte40_demanda, 2)
-    )
-  
-  oferta_2 <- oferta_GO %>%
-    mutate(cod_regsaud = as.character(cod_regsaud)) %>%
-    mutate(ano_mes = ym(COMPETEN)) %>%
-    mutate(horas = HORAOUTR + HORAHOSP + HORA_AMB) %>%
-    mutate(prof = if_else(substr(CBO, 1, 4) == "2235", "Enfermeiro", "Médico")) %>%
-    group_by(uf, cod_regsaud, regiao_saude, prof, ano_mes) %>%
-    summarise(horas = 4 * sum(horas)) %>%
-    left_join(producao_SISAB, by = c("cod_regsaud" = "Cod_Regiao_Saude")) %>%
-    mutate(fte40 = horas / 133) %>%
-    mutate(direto = if_else(prof == "Enfermeiro",
-                          fte40 * perc_direto1,
-                          fte40 * perc_direto2)) %>%
-    mutate(liquido = direto * Porcentagem) %>%
-    mutate(ano_mes_corrigido = ano_mes + years(2)) %>%
-    select(-ano_mes) %>%
-    mutate(
-      Porcentagem = round(Porcentagem, 2),
-      fte40 = round(fte40, 2),
-      direto = round(direto, 2),
-      liquido = round(liquido, 2)
-    )
-  
-  demanda_2$ibge <- as.character(demanda_2$ibge)
-  
-  demanda_oferta_2 <- demanda_2 %>%
-    left_join(
-      oferta_2,
-      by = c("ibge" = "cod_regsaud", 
-             "categoria" = "prof", 
-             "mês_procedimento_realizado" = "ano_mes_corrigido"),
-      suffix = c("_demanda", "_oferta")
-    ) %>%
-    filter(uf != "NA") %>%
-    mutate(ano = year(mês_procedimento_realizado)) %>%
-    mutate(resultado = liquido - fte40_demanda) %>%
-    group_by(ibge, ano, categoria, uf, regiao_saude) %>%
-    summarise(
-      resultado = sum(resultado),
-      demanda = sum(fte40_demanda),
-      oferta = sum(liquido)
-    )
+cost <- 
+  anual_demand_supply |> 
+  mutate(abs_result = abs_result * (-1)) |> 
+  mutate(cost = if_else(cadre == "Enfermeiro", 
+                        abs_result * 15012.25,
+                        abs_result * 28241.63)) |> 
+  mutate(cost_mi = round((cost/1000000),1))
 
-
-  return(demanda_oferta_2)
-}
-
+cost |> 
+  ggplot(aes(x = fct_reorder(regiao_saude,
+                             cost), 
+             y = cost_mi)) + geom_col() + 
+  geom_text(aes(label = cost_mi), parse = 2,
+            nudge_y = 5) +
+  coord_flip() + facet_wrap(~cadre) + 
+  theme_minimal() + xlab("Health Region") + 
+  ylab("Demand vs Supply") + 
+  theme(legend.title = element_blank())
 
 
 ```
 
-## 1 - Baseline scenario
-
-```{r}
-
-baseline <- demanda_oferta |> 
-                mutate(cenario = "baseline")
-
-cenario_1_go <- 
-  baseline |> 
-  group_by(categoria, cenario) |> 
-  summarise(resultado = sum(resultado))
-
-cenario_1_go
-
-```
-
-## 2 - Scenario 2 - Increase of Direct Activities
-
-We will increase 10% of direct activities for both professionals
-
-```{r}
-
-cenario_2 <- funcao_demanda_oferta(0.50, 1.00, 0.30, 0.39) |>  
-  mutate(percentage = (oferta * 100)/demanda,
-         percentage = round(percentage, 2)) |> 
-  mutate(id = as.integer(ibge)) |> 
-  select(id, regiao_saude, categoria, resultado, percentage)
-
-DT::datatable(cenario_2)
-
-```
-
-```{r}
-
-cenario_2_go <- 
-  cenario_2 |> 
-  mutate(cenario = "scenario 2") |> 
-  group_by(categoria, cenario) |> 
-  summarise(resultado = sum(resultado))
-
-cenario_2_go
-
-```
-
-## 3 - Scenario 3 - Increase of Direct Activities
-
-```{r}
-
-cenario_3 <- funcao_demanda_oferta(0.66, 1.26, 0.40, 0.49) |>  
-  mutate(percentage = (oferta * 100)/demanda,
-         percentage = round(percentage, 2)) |> 
-  mutate(id = as.integer(ibge)) |> 
-  select(id, regiao_saude, categoria, resultado, percentage)
-
-DT::datatable(cenario_3)
-
-```
-
-```{r}
-cenario_3_go <- 
-  cenario_3 |> 
-  mutate(cenario = "scenario 3") |> 
-  group_by(categoria, cenario) |> 
-  summarise(resultado = sum(resultado))
-
-cenario_3_go
-
-```
-
-## 4 - Scenario 4 - Increase of Direct Activities
-
-```{r}
-
-cenario_4 <- funcao_demanda_oferta(0.50, 1.00, 0.50, 0.59) |>  
-  mutate(percentage = (oferta * 100)/demanda,
-         percentage = round(percentage, 2)) |> 
-  mutate(id = as.integer(ibge)) |> 
-  select(id, regiao_saude, categoria, resultado, percentage)
-
-DT::datatable(cenario_4)
-
-```
-
-```{r}
-cenario_4_go <- 
-  cenario_4 |> 
-  mutate(cenario = "scenario 4") |> 
-  group_by(categoria, cenario) |> 
-  summarise(resultado = sum(resultado))
-
-cenario_4_go
-
-```
-
-## 5 - Scenario 5 - Increase of Direct Activities
-
-```{r}
-
-cenario_5 <- funcao_demanda_oferta(0.50, 1.00, 0.60, 0.69) |>  
-  mutate(percentage = (oferta * 100)/demanda,
-         percentage = round(percentage, 2)) |> 
-  mutate(id = as.integer(ibge)) |> 
-  select(id, regiao_saude, categoria, resultado, percentage)
-
-DT::datatable(cenario_5)
-
-```
-
-```{r}
-cenario_5_go <- 
-  cenario_5 |> 
-  mutate(cenario = "scenario 5") |> 
-  group_by(categoria, cenario) |> 
-  summarise(resultado = sum(resultado))
-
-cenario_5_go
-
-```
-
-### Mapa do cenário 5
-
-We will now ilustrate the results, in terms of percentage, using a map.
-
-```{r}
-
-spdf <- geojson_read("shape file regioes saude.json",  what = "sp")
-
-```
-
-```{r}
-#| warning: false
-
-cenario_5$id <- as.integer(cenario_5$id)
-
-spdf_region <- spdf[ spdf@data$est_id == "52" , ]
-
-
-spdf_fortified <- sf::st_as_sf(spdf_region)
-
-x <- spdf_fortified |>
-  left_join(cenario_5, by = c("reg_id"="id")) |>
-  mutate(categoria = if_else(categoria == "Médico","Physician","Nurse")) |> 
-  ggplot() +
-  geom_sf(aes(fill = percentage)) +
-  geom_sf_text(aes(label = regiao_saude), size = 3.5) +
-  theme_minimal() +
-  scale_fill_gradient(low = "#F8766D", high = "#00BA38", n.breaks = 10) +
-  facet_wrap(~categoria, nrow = 1) +
-  theme(
-    axis.line = element_blank(),
-    axis.text.x = element_blank(),
-    axis.text.y = element_blank(),
-    axis.ticks = element_blank(),
-    axis.title.x = element_blank(),
-    axis.title.y = element_blank()
-  ) + ggtitle("Scenario 5")
-
-x
-```
-
-## Juntando tudo
-
-```{r}
-cenarios <- rbind(cenario_1_go,
-                  cenario_2_go,
-                  cenario_3_go,
-                  cenario_4_go,
-                  cenario_5_go)
-
-
-y <- cenarios |> 
-  mutate(resultado = round(resultado)) |> 
-  ggplot(aes(x = cenario, y = resultado, fill = categoria)) + 
-  geom_col(position = "dodge") + 
-  geom_text(aes(label = resultado), vjust = 1, position = position_dodge(width = 1)) + theme(legend.position="top") +
-  theme_minimal() + xlab("Scenario") + ylab("Result") + 
-  theme(text = element_text(size = 25))
-
-
-y 
-```
-
-```{r}
-
-y + x
-
-```
-
-# Complementary materials
-
-```{r}
-
-b <- spdf_fortified |>
-  left_join(demanda_oferta, by = c("reg_id"="id")) |>
-#  mutate(categoria = if_else(categoria == "Médico","Physician","Nurse")) |> 
-  ggplot() +
-  geom_sf(fill="lightblue") +
-  geom_sf_label(aes(label = regiao_saude), size = 2.8) +
-  theme_minimal() +
- # scale_fill_gradient(low = "#F8766D", high = "#00BA38", n.breaks = 10) +
-#  facet_wrap(~categoria, nrow = 1) +
-  theme(
-    axis.line = element_blank(),
-    axis.text.x = element_blank(),
-    axis.text.y = element_blank(),
-    axis.ticks = element_blank(),
-    axis.title.x = element_blank(),
-    axis.title.y = element_blank()
-  ) + ggtitle("Goiás Health Regions")
-
-b
-```
-
-```{r}
-library(patchwork)
-
-b | (a + plot_spacer() + plot_spacer())
-
-```
-
-## Predictions (current vs predictions)
-
-```{r}
-
-previsoes <- read_delim("previsao_vs_atual/Previsão de nascidos por ano.csv", 
-    delim = ";", escape_double = FALSE, trim_ws = TRUE) |> 
-             mutate(date = as.Date(mes_ano, format = "%d/%m/%Y")) |> 
-             gather(key = "type", value = "births", 
-                    1:2) 
-
-previsoes |> 
-    ggplot(aes(x = date, y = births, col = type)) + geom_line(size = 1.25) +
-  theme_minimal() + theme(text = element_text(size = 25)) 
-
-```
-
-## figura
-
-```{r}
-options(scipen = 999)
-
-demand |> 
-  select(procedimento, data, categoria, tempo) |> 
-  group_by(procedimento) |> 
-  summarise(workload = sum(tempo)) |> 
-  ggplot(aes(x = fct_reorder(procedimento, workload), y = workload)) + 
-  geom_col() + coord_flip() + theme_minimal() + xlab("Activities") +
-  ylab("Workload for 2024 (in hours)") +
-  theme(text = element_text(size = 25))
-
-```
-
-## Looking for some reasons for discussion
-
-```{r}
-#| warning: false
-
-cobertura <- read_delim("cobertura.csv", 
-    delim = ";", escape_double = FALSE, trim_ws = TRUE)
-
-```
-
-```{r}
-#| warning: false
-
-cobertura_demanda_oferta <- 
-  cobertura |> 
-  select(CO_CIR, NO_REGIAO_SAUDE, PC_COBERTURA_AB, PC_COBERTURA_SF) |> 
-  left_join(demanda_oferta, by = c("CO_CIR"="id"))
-```
-
-```{r}
-#| warning: false
- 
-cobertura_demanda_oferta |> 
-  filter(categoria == "Enfermeiro") |> 
-  ggplot(aes(PC_COBERTURA_AB, percentage)) + geom_smooth(method = 'lm', se = FALSE) +
-  geom_label(aes(label = NO_REGIAO_SAUDE)) + theme_minimal()
-```
-
-```{r}
-#| warning: false
-
-cobertura_demanda_oferta |> 
-  filter(categoria == "Médico") |> 
-  ggplot(aes(PC_COBERTURA_AB, percentage)) + geom_smooth(method = 'lm', se = FALSE) +
-  geom_label(aes(label = NO_REGIAO_SAUDE)) + theme_minimal() 
-```
-
-##Human Development Index
-
-```{r}
-
-hierarquia_municipios <- read_excel("hierarquia_municipios.xlsx", 
-    col_types = c("text", "text", "numeric", 
-        "text", "text", "text", "numeric", 
-        "text", "text", "numeric", "text", 
-        "text", "text", "numeric", "text", 
-        "text", "numeric", "numeric"))
-
-idh <- read_delim("idh.csv", delim = ";", 
-    escape_double = FALSE, col_types = cols(cod_ibge = col_character()), 
-    trim_ws = TRUE) |> 
-      mutate(ibge = substr(cod_ibge, 1, 6)) |> 
-      left_join(hierarquia_municipios, by = c("ibge"="cod_municipio")) |> 
-      group_by(cod_regsaud) |> 
-      summarise(idh_medio = mean(idh_2010))
-
-demanda_oferta |> 
-  left_join(idh, by = c("id"="cod_regsaud")) |> 
-  ggplot(aes(x = idh_medio, y = percentage)) + 
-  geom_label(aes(label = regiao_saude)) +
-  geom_smooth(method = "lm", se = FALSE ) + facet_wrap(~categoria)
-
-
-
-
-
-```
