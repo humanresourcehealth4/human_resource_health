@@ -62,16 +62,14 @@ The following figure illustrates the 18 health regions of Goiás state.
 
 Each pregnant will require a set of services during pregnancy and after delivery according to recommendation of Brazilian Minister of Health. The same happens for the baby as soon as it is born.
 
-$$
-NHS\underset{r,t}{} = SD\underset{r,t}{} \times (H\underset{r,t}{} \times \sum_{t = 1}^{32}L\underset{y,t}{}) 
-$$ {#eq-1}
+![](imagens/eq1.svg){fig-align="center"}
 
 where:
 
--   $NHS\underset{t}{}$ represents Needed Health Services (NHS) which is the minimal programmatic services needed to address each the health status in a health region *r* in a given time *t*.
--   $SD$ represents a percentage of population which dependent of Brazilian Health Unified System (Sistema Único de Saúde - SUS) in a given health region *r* and *t.*
--   $H\underset{r,t}{}$ represents the health status - births - for each month *t* and a region *r*.
--   $L$ represents the number of services of type *y* required for each pregnant or baby in given time *t* before and after the child birth. The index goes from 0 to 32 because each month has programmatic services dedicated to either the pregnant woman (from t = 0 until t = 9) or the baby (from t = 9 until t = 32).
+-   NHS represents Needed Health Services (NHS) which is the minimal programmatic services needed to address each the health status in a health region *r* in a given time *t*.
+-   SD represents a percentage of population which dependent of Brazilian Health Unified System (Sistema Único de Saúde - SUS) in a given health region *r* and *t.*
+-   H represents the health status - births - for each month *t* and a region *r*.
+-   L represents the number of services of type *y* required for each pregnant or baby in given time *t* before and after the child birth. The index goes from 0 to 32 because each month has programmatic services dedicated to either the pregnant woman (from t = 0 until t = 9) or the baby (from t = 9 until t = 32).
 
 ### 2.1. Health Status (H) and SUS dependent population (SD)
 
@@ -283,31 +281,27 @@ The new dataframe contains the variables `qtt_cadre`, `categoria` and `CBO`, whe
 
 The next step involves defining the service standard (SS) - the average time, in hours, a trained and motivated health professional spends to perform an intervention of type y. The available working time (AWT) is the total annual time a health worker has available after deducing absences. Once we have both parameters, it is possible to calculate the service workload (SW) which is defined as a "standard workload for health professional of category n when performing service activity y" (Asamani et al., 2021, p. 7).
 
-$$
-SW\underset{n,y}{} = \frac{AWT{n}{}}{SS{y,n}{}}
-$$ {#eq-2}
+![](imagens/eq2.svg){fig-align="center"}
 
 We adapted Asamani's equation for our case study but with no loss to the mathematical logic.
 
 After including both elements, the equation 1 is complemented as below:
 
-$$
-N\underset{n,r,t}{} = \frac{SD\underset{r,t}{} \times (H\underset{r,t}{} \times \sum_{t = 1}^{32}(L\underset{y,t}{} \times SS\underset{y}{}))}{AWT\underset{n,t}{}} 
-$$ {#eq-3}
+![](imagens/eq3.svg){fig-align="center"}
 
 where:
 
--   $N\underset{n,r,t}{}$ is the number of professionals of category n, in FTE40, needed in a given region r and period t.
+-   N is the number of professionals of category *n*, in FTE40, needed in a given region *r* and period *t*.
 
--   $SD$ represents a percentage of population which dependent of Brazilian Health Unified System (Sistema Único de Saúde - SUS) in a given health region *r* and *t.*
+-   R represents a percentage of population which dependent of Brazilian Health Unified System (Sistema Único de Saúde - SUS) in a given health region *r* and *t.*
 
--   $H\underset{r,t}{}$ represents the health status - births - for each month *t* and a region *r*.
+-   H represents the health status - births - for each month *t* and a region *r*.
 
--   $L\underset{y,t}{}$ represents the number of services of type *y* required for each pregnant or baby in given time *t* before and after the child birth. The index goes from 1 to 32 because each month has programmatic services dedicated to either the pregnant woman or the baby.
+-   L represents the number of services of type *y* required for each pregnant or baby in given time *t* before and after the child birth. The index goes from 1 to 32 because each month has programmatic services dedicated to either the pregnant woman or the baby.
 
--   $SS\underset{y}{}$ standard time of intervetion, in hours, performed by a trained and motivated professional. We used time collected in past experiences. Using time motion techniques Bonfim et al. (2014) registered that nursing appointments took about 25,3 minutes (Brazil average) in the PHC setting. Educative actions took about 73 minutes. We will use these number as reference.
+-   SS standard time of intervetion, in hours, performed by a trained and motivated professional. We used time collected in past experiences. Using time motion techniques Bonfim et al. (2014) registered that nursing appointments took about 25,3 minutes (Brazil average) in the PHC setting. Educative actions took about 73 minutes. We will use these number as reference.
 
--   $AWT\underset{n,t}{}$ is the available working time after deducting absence. Originally this is a metric measured in years. But we adapted it since our analysis are monthly based. We used the AWT available from Bonfim et al. (2014).
+-   AWT is the available working time after deducting absence. Originally this is a metric measured in years. But we adapted it since our analysis are monthly based. We used the AWT available from Bonfim et al. (2014).
 
 The following chunk of code translates the volume of programatic interventions into hours needed by a given professional.
 
@@ -345,33 +339,6 @@ glimpse(prof_demand)
 
 ```
 
-```{r}
-#| warning: false
-#| eval: false
-#| include: false
-
-## Lendo os dados de **demanda** e filtrando apenas observações necessárias
-# OBSERVAÇÃO: AQUI TEMOS OS DADOS DE DEMANDA CONFORME A LEITURA DOS DADOS QUE FIZ NO PYTHON 
-
-
-cegonha_go <- read_csv("df_prof_go.csv") |> 
-                  filter(nivel_atencao == 'APS') |> 
-                  select(regiao, mês_procedimento_realizado, CBO,
-                         horas_categoria, fte40) |> 
-                    mutate(prof = case_when(substr(CBO, 1, 4) == "2235" ~ "Enfermeiro",
-                                            substr(CBO, 1, 4) == "2251" ~ "Médico",
-                                            TRUE ~ "Outros")) |> 
-                    filter(prof != "Outros") 
-
-demanda_py <- cegonha_go |> 
-  group_by(regiao, mês_procedimento_realizado,
-           prof) |> 
-  summarise(fte40_demanda = sum(fte40)) |> 
-  mutate(regiao = as.character(regiao)) |> 
-  filter(mês_procedimento_realizado > "2021-01-01")
-
-```
-
 Asamani et al (2021) incorporates a last element which is the indirect activity rate. We will apply this element on the supply side, following Mackenzie et al. (2019) steps. Furthermore, these numbers represent the total number of FTE professional needed to work in a minimal set of procedures during pregnancy and newbord assistance.
 
 # 4 - Exploring resource implications
@@ -398,9 +365,19 @@ sisab <- read_excel("~/GitHub/human_resource_health/03_hrh_model/data/producao_S
 
 ## 4.1. Transforming supply data
 
-$$
-S\underset{n,r,t}{} = A\underset{n,r,t}{} \times D\underset{n,r,t}{} \times F\underset{n,r,t}{}
-$$
+Supply was calculated using the following equation:
+
+![](imagens/eq4.svg){fig-align="center"}
+
+Where:
+
+-   S represents the net supply of professionals of type *n*, in a region *r* and a period *t*.
+
+-   A represents the total supply of professional of type *n*, in a region *r* and a period *t* without further deduction.
+
+-   D represents the percentage of direct activities that professional of type n usually perform
+
+-   F represents the percentage of time dedicated to caring for pregnant women and children
 
 Our supply dataset will eventually have duplicate values due to multiple cadre association. In order to overcome this issue, we use a standard of full time equivalent metric.
 
@@ -532,7 +509,7 @@ spdf_fortified |>
   theme_minimal() +
   scale_fill_gradient(low = "#F8766D", 
                       high = "#00BA38", 
-                      n.breaks = 10) +
+                      n.breaks = 5) +
   facet_wrap(~cadre, nrow = 1) +
   theme(
     axis.line = element_blank(),
@@ -540,10 +517,10 @@ spdf_fortified |>
     axis.text.y = element_blank(),
     axis.ticks = element_blank(),
     axis.title.x = element_blank(),
-    axis.title.y = element_blank()
-  ) + 
-  ggtitle("Supply vs Demand", "Nurses and Physician for Maternal and Newborn Assistance in the Primary Health Care Context")
-
+    axis.title.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  ) 
 ```
 
 ## 4.3. Exploring cost implication
@@ -558,17 +535,20 @@ Using a conversion rate of 4.90 reais (R\$) to each dollar (R\$), the values are
 
 | Cadre     | Annual Costs (US\$) |
 |-----------|---------------------|
-| Nursing   | 15012.25           |
-| Physician | 28241.63           |
+| Nursing   | 15012.25            |
+| Physician | 28241.63            |
 
-After applying these values to our results, it is possible to capture how much should be invested in order to balance demanda and supply for human resources for health in each health region. 
+After applying these values to our results, it is possible to capture how much should be invested in order to balance demanda and supply for human resources for health in each health region.
 
 ```{r}
 
 cost <- 
   anual_demand_supply |> 
   mutate(abs_result = abs_result * (-1)) |> 
-  mutate(cost = if_else(cadre == "Enfermeiro", 
+  mutate(cadre = if_else(cadre == "Enfermeiro",
+                        "Nurse","Physician")
+         ) |> 
+  mutate(cost = if_else(cadre == "Nurse", 
                         abs_result * 15012.25,
                         abs_result * 28241.63)) |> 
   mutate(cost_mi = round((cost/1000000),1))
@@ -581,9 +561,48 @@ cost |>
             nudge_y = 5) +
   coord_flip() + facet_wrap(~cadre) + 
   theme_minimal() + xlab("Health Region") + 
-  ylab("Demand vs Supply") + 
-  theme(legend.title = element_blank())
+  ylab("US$") + 
+  theme(legend.title = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
 
 
 ```
 
+# 5. Conducting sensitivity analysis
+
+The sensitivity analysis was performed using shiny apps. We created an app where user can perform changes in some parameters.
+
+The app can be accessed here.
+
+# References
+
+1.  Asamani, J. A., Christmals, C. D., & Reitsma, G. M. (2021). The needs-based health workforce planning method: a systematic scoping review of analytical applications. *Health Policy and Planning*, *36*(8), 1325-1343.
+
+2.  MacKenzie, A., Tomblin Murphy, G., & Audas, R. (2019). A dynamic, multi-professional, needs-based simulation model to inform human resources for health planning. *Human Resources for Health*, *17*, 1-13.
+
+# Appendix A - FTE
+
+FTE is a commom metric used in workforce planning and [human resources](https://www.shrm.org/resourcesandtools/tools-and-samples/hr-qa/pages/full-time-equivalent-hours.aspx#:~:text=The%20calculation%20of%20full%2Dtime,per%20week%20are%200.5%20FTEs.) studies whose objective is to standardize the number of professionals considering the workload.
+
+Consider that, when calculating **demand**, 3200 hours of nurses are needed per month to provide all services. Translating into number of professionals, we have:
+
+3200/126 = 25.39
+
+In other words, given that the workload of a full-time professional - after deducting absences - is 126 hours, we would need 25 professionals for 40 hours and one professional for 16 hours (referring to 0.39).
+
+The metric can also be used to standardize the **supply**. Considering the following table with professionals. How many nurses are there? Immediately, one can think of three nurses. However, they have different workloads. How to standardize this?
+
+| Name             | Cadre                  | Weekly workload |
+|------------------|------------------------|-----------------|
+| Mary             | Enfermeiro             | 35              |
+| John             | Enfermeiro             | 25              |
+| Suzan            | Enfermeiro             | 40              |
+
+Nurse = 35 + 25 + 40 =\> 100 weekly hours
+
+Nurse = 100 x 4.345 = 434.5 monthly hours
+
+Nurse = 434.5/126 =\> 3.44 professionals in FTE-40
+
+It can be seen that we have 3.44 full-time equivalent nursing professionals, considering a workload of 40 hours per week.
