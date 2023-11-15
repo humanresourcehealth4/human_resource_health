@@ -542,8 +542,17 @@ After applying these values to our results, it is possible to capture how much s
 
 ```{r}
 
+total_nv <- 
+  predictions |> 
+  mutate(year = year(complete_date)) |> 
+  filter(year == 2024) |> 
+  group_by(ibge, regiao_saude) |> 
+  summarise(nascidos = sum(sus_qtt))
+
 cost <- 
   anual_demand_supply |> 
+  left_join(total_nv,
+            by = "ibge") |> 
   mutate(abs_result = abs_result * (-1)) |> 
   mutate(cadre = if_else(cadre == "Enfermeiro",
                         "Nurse","Physician")
@@ -551,29 +560,317 @@ cost <-
   mutate(cost = if_else(cadre == "Nurse", 
                         abs_result * 15012.25,
                         abs_result * 28241.63)) |> 
-  mutate(cost_mi = round((cost/1000000),1))
+  mutate(cost_mi = round((cost/1000000),1))  |> 
+  mutate(cost_pc = round((cost/nascidos))) |> 
+  mutate(cost_pc_mi = round(cost_pc/1000, 1))
+
+cost_go <- cost |> 
+              group_by(ibge,
+                       regiao_saude.x) |> 
+              summarise(cost = sum(cost)) |> 
+              mutate(cost_mi = cost/1000000) |> 
+              left_join(total_nv,
+                          by = "ibge")  |> 
+              mutate(cost_pc = cost/nascidos)
 
 cost |> 
-  ggplot(aes(x = fct_reorder(regiao_saude,
-                             cost), 
-             y = cost_mi)) + geom_col() + 
-  geom_text(aes(label = cost_mi), parse = 2,
-            nudge_y = 5) +
+  group_by(cadre) |> 
+  summarise(cost = sum(cost)) |> 
+  mutate(cost_mi = cost/1000000)
+  
+  
+```
+
+Graphs
+
+```{r}
+  cost |> 
+  filter(cadre == "Nurse") |> 
+  ggplot(aes(x = fct_reorder(regiao_saude.x,
+                             cost_pc_mi), 
+             y = cost_pc_mi)) + geom_col() + 
+  geom_text(aes(label = cost_pc_mi),
+            hjust = -0.1, size = 6) +
   coord_flip() + facet_wrap(~cadre) + 
   theme_minimal() + xlab("Health Region") + 
-  ylab("US$") + 
+  ylab("cost by NV (in thousand US$)") + 
   theme(legend.title = element_blank(),
         panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank())
+        panel.grid.minor = element_blank(),
+        text = element_text(size = 20))
 
+
+cpc_physician <- 
+  cost |> 
+  filter(cadre == "Physician") |> 
+  ggplot(aes(x = fct_reorder(regiao_saude.x,
+                             cost_pc_mi), 
+             y = cost_pc_mi)) + geom_col() + 
+  geom_text(aes(label = cost_pc_mi),
+            hjust = -0.1, size = 6) +
+  coord_flip() + facet_wrap(~cadre) + 
+  theme_minimal() + xlab("") + 
+  ylab("cost by NV (in thousand US$)") + 
+  theme(legend.title = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        text = element_text(size = 20))
+
+cpc_nurse 
 
 ```
 
 # 5. Conducting sensitivity analysis
 
-The sensitivity analysis was performed using shiny apps. We created an app where user can perform changes in some parameters.
+The sensitivity analysis was performed using a function that recalculate the results according to the parameters change.
 
-The app can be accessed here.
+The following chunk is used to create the function.
+
+```{r}
+
+function_hrh <- function(perc_private,
+                         consulta,visita,
+                         perc_enf, perc_med){
+
+  phc_services <- services |> 
+                filter(level_service == "APS") |> 
+                filter(month <= 24) |> 
+                mutate(total = sus_qtt - (sus_qtt * {{perc_private}})) |> 
+                mutate(procedure_qtt = sus_qtt * parameter) |> 
+                filter(type == "Consultas ou Visitas" |
+                       type == "Ações Educacionais")
+                
+  professional_services <- phc_services |> 
+                            left_join(qtt_professional, 
+                                      by = c("sigtap" =
+                                             "codigo_sigtap")) |> 
+                            mutate(qtt_cadre = procedure_qtt/n) |> 
+                            left_join(procedures_professional, 
+                                      by = c( "sigtap"="codigo_sigtap")) |> 
+                            filter(categoria == "Enfermeiro" | 
+                                   categoria == "Médico") |> 
+                            rename(cadre = categoria)
+  
+  demand_hours <- professional_services |> 
+                mutate(month_performed = as.Date(month_performed)) |> 
+                mutate(year = year(month_performed)) |> 
+                filter(year == 2024) |> 
+                mutate(time_needed = 
+                         if_else(type == "Consultas ou Visitas",
+                                        qtt_cadre * {{consulta}},
+                                        qtt_cadre * {{visita}}))
+  
+  prof_demand <- demand_hours |> 
+        select(ibge, year, month_performed, CBO, 
+               cadre, time_needed) |> 
+        mutate(fte40 = time_needed/126) |> 
+        group_by(ibge, month_performed, year, CBO, cadre) |> 
+        summarise(total_time = sum(time_needed),
+                  fte40_demand = sum(fte40),
+                  fte40_demand = round(fte40_demand, 2))
+  
+  
+  supply_GO <- 
+    supply |> 
+    mutate(year_month = ym(COMPETEN)) |> 
+    left_join(sisab, by = c("cod_regsaud"="Cod_Regiao_Saude")) |> 
+    mutate(fte40_supply = CH/126) |> 
+    mutate(direct_supply = if_else(CATEGORIA == "ENFERMEIRO",
+                            fte40_supply * {{perc_enf}},
+                            fte40_supply * {{perc_med}})) |> 
+    mutate(net_supply = direct_supply * Porcentagem) |>
+    mutate(year_month = year_month + years(2)) |> 
+    mutate(Porcentagem = round(Porcentagem, 2),
+           fte40_supply = round(fte40_supply, 2),
+           direct_supply = round(direct_supply, 2),
+           net_supply = round(net_supply, 2)) |> 
+    mutate(CATEGORIA = if_else(CATEGORIA == "ENFERMEIRO",
+                               "Enfermeiro","Médico")) |> 
+    select(year_month, cod_regsaud, regiao_saude,
+           CATEGORIA, CH, Porcentagem, fte40_supply, 
+           direct_supply, net_supply)
+  
+    monthly_demand_supply <- 
+    prof_demand |>  
+    left_join(supply_GO, by = c("ibge"="cod_regsaud",
+                                "cadre"="CATEGORIA",                          "month_performed"="year_month")) |> 
+    mutate(year = year(month_performed)) |> 
+    mutate(result = net_supply - fte40_demand) |> 
+    mutate(perc = (100 * net_supply)/fte40_demand)
+  
+  anual_demand_supply <-
+    monthly_demand_supply |> 
+      group_by(ibge, regiao_saude, cadre) |> 
+      summarise(
+        anual_demand = sum(fte40_demand),
+        anual_net_supply = sum(net_supply)) |> 
+      mutate(anual_demand = round(anual_demand, 2),
+             anual_net_supply = round(anual_net_supply, 2)) |> 
+      mutate(abs_result = anual_net_supply - anual_demand,
+             abs_result = round(abs_result, 2)) |> 
+      mutate(perc_result = (100 * anual_net_supply)/anual_demand,
+             perc_result = round(perc_result, 2))
+  
+  #DT::datatable(anual_demand_supply)
+
+  
+}
+
+
+
+```
+
+## 5.2.1. Cenário Baseline
+
+In this scenario we use the following parameters
+
+| Parameter               | Value |
+|-------------------------|-------|
+| Use of private services | 0%    |
+| Consulta                | 0.66  |
+| ação educativa          | 1.266 |
+| Percentual enfermeiros  | 30%   |
+| Percentual médicos      | 39%   |
+
+```{r}
+
+#| warning: false
+
+
+baseline <- function_hrh(0,0.66,1.266,0.30,0.39) |> 
+                mutate(scenario = "baseline")
+
+cenario2 <- function_hrh(0,0.50,1.0,0.30,0.39) |> 
+                mutate(scenario = "scenario 2")
+
+cenario3 <- function_hrh(0,0.66,1.266,0.50,0.59)|> 
+                mutate(scenario = "scenario 3")
+
+cenario4 <- function_hrh(0,0.50, 1, 0.50, 0.59)|> 
+                mutate(scenario = "scenario 4")
+
+cenario5 <- function_hrh(0.25, 0.66, 1.266, 0.30, 0.39)|> 
+                mutate(scenario = "scenario 5")
+
+cenario6 <- function_hrh(0.25,0.50, 1.00, 0.30, 0.39)|> 
+                mutate(scenario = "scenario 6")
+
+cenario7 <- function_hrh(0.25, 0.66, 1.266, 0.50, 0.59)|> 
+                mutate(scenario = "scenario 7")
+
+
+cenario8 <- function_hrh(0.25, 0.50, 1.00, 0.50, 0.59)|> 
+                mutate(scenario = "scenario 8")
+
+
+cenario9 <- function_hrh(0.30,0.66, 1.266, 0.50, 0.59)|> 
+                mutate(scenario = "scenario 9")
+
+
+cenario10 <- function_hrh(0.30, 0.50, 1.0, 0.30, 0.39)|> 
+                mutate(scenario = "scenario 10")
+
+
+cenario11 <- function_hrh(0.30, 0.66, 1.266, 0.50, 0.59)|> 
+                mutate(scenario = "scenario 11")
+
+
+cenario12 <- function_hrh(0.30, 0.50, 1.00, 0.50, 0.59)|> 
+                mutate(scenario = "scenario 12")
+
+
+cenario13 <- function_hrh(0.40, 0.50, 1.00, 0.60, 0.69)|> 
+                mutate(scenario = "scenario 13")
+
+scenarios <-
+  rbind(baseline,
+        cenario2,
+        cenario3,
+        cenario4,
+        cenario5,
+        cenario6,
+        cenario7,
+        cenario8,
+        cenario9,
+        cenario10,
+        cenario11,
+        cenario12,
+        cenario13)
+
+#writexl::write_xlsx(scenarios, "scenarios.xlsx")
+
+scenarios |> 
+  group_by(cadre, scenario) |> 
+  summarise(demand = sum(anual_demand),
+            supply = sum(anual_net_supply)) |> 
+  mutate(abs = supply - demand) |> 
+  mutate(perc = supply * 100/demand)
+
+```
+
+# Tables for paper
+
+Table 3 - article
+
+```{r}
+
+
+density <- 
+  anual_demand_supply |> 
+  left_join(total_nv, by = "ibge") |> 
+  mutate(density_demand = (anual_demand/nascidos)*1000,
+         density_demand = round(density_demand, 2)) |> 
+  mutate(density_supply = (anual_net_supply/nascidos) *1000,
+         density_supply = round(density_supply, 2)) |> 
+  select(regiao_saude.x, cadre, anual_demand, anual_net_supply, 
+         nascidos,density_demand,density_supply)
+
+#writexl::write_xlsx(density, "density_table.xlsx")
+
+DT::datatable(density)
+```
+
+Table of services
+
+```{r}
+
+service_appendix <- services |> 
+  select(sigtap, procedure, month, parameter,
+         type, target_public) |> 
+  distinct()
+
+#writexl::write_xlsx(service_appendix, "service_appendix.xlsx")
+
+```
+
+# 6. Discussion
+
+```{r}
+
+pibpc_go_19 <- read.csv("~/GitHub/human_resource_health/03_hrh_model/data/pibpc_go_19.csv")
+
+
+hierarquia_municipios <- read_excel("~/GitHub/human_resource_health/03_hrh_model/data/hierarquia_municipios.xlsx", 
+    col_types = c("text", "text", "numeric", 
+        "text", "text", "text", "numeric", 
+        "text", "text", "numeric", "text", 
+        "text", "text", "numeric", "text", 
+        "text", "numeric", "numeric"))
+
+idh <- read_delim("~/GitHub/human_resource_health/03_hrh_model/data/idh.csv", delim = ";", 
+    escape_double = FALSE, col_types = cols(cod_ibge = col_character()), 
+    trim_ws = TRUE) |> 
+      mutate(ibge = substr(cod_ibge, 1, 6)) |> 
+      left_join(hierarquia_municipios, by = c("ibge"="cod_municipio")) |> 
+      group_by(cod_regsaud) |> 
+      summarise(idh_medio = mean(idh_2010))
+
+anual_demand_supply |> 
+  left_join(pibpc_go_19, by = c("ibge"="cod_regsaud")) |> 
+  ggplot(aes(x = PIB_PER_CAPITA, y = perc_result)) + 
+  geom_label(aes(label = regiao_saude.x)) +
+  geom_smooth(method = "lm", se = FALSE ) + facet_wrap(~cadre)
+```
 
 # References
 
@@ -593,11 +890,11 @@ In other words, given that the workload of a full-time professional - after dedu
 
 The metric can also be used to standardize the **supply**. Considering the following table with professionals. How many nurses are there? Immediately, one can think of three nurses. However, they have different workloads. How to standardize this?
 
-| Name             | Cadre                  | Weekly workload |
-|------------------|------------------------|-----------------|
-| Mary             | Enfermeiro             | 35              |
-| John             | Enfermeiro             | 25              |
-| Suzan            | Enfermeiro             | 40              |
+| Name  | Cadre      | Weekly workload |
+|-------|------------|-----------------|
+| Mary  | Enfermeiro | 35              |
+| John  | Enfermeiro | 25              |
+| Suzan | Enfermeiro | 40              |
 
 Nurse = 35 + 25 + 40 = 100 weekly hours
 

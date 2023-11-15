@@ -1,5 +1,6 @@
 
 library(tidyverse)
+library(lubridate)
 
 # loading real data of births in Goias
 
@@ -41,16 +42,44 @@ df_model_state <-
   mutate(line_type = if_else(highlight == 1.5, "solid",
                              "dashed"))
 
-df_model_state |> 
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+
+df_model_state %>%
+  mutate(
+    model = case_when(
+      model == "arima" ~ "ARIMA",
+      model == "ets" ~ "ETS",
+      model == "mlp" ~ "MLP",
+      model == "prophet" ~ "Prophet",
+      model == "real" ~ "Observed"
+    ),
+    complete_date = as.Date(complete_date)  
+  ) %>%
   ggplot(aes(x = complete_date, y = birth, 
              col = model, size = highlight,
-             linetype = line_type)) + 
-  geom_line() +  
-  scale_size_identity() + 
-  theme_minimal() + xlab("Date") + 
-  ylab("# births") + 
+             linetype = line_type)) +
+  geom_line() +
+  scale_size_identity() +
+  scale_y_continuous(labels = scales::comma) +  
+  theme_minimal() +
+  theme(
+    text = element_text(size = 22),
+    panel.grid = element_blank(),  
+    axis.text.x = element_text(angle = 45, hjust = 1)  
+  ) +
+  xlab("Month/Year") +
+  ylab("# births") +
   guides(linetype = FALSE) +
-  theme(text = element_text(size = 22))
+  scale_x_date(
+    labels = scales::date_format("%b %Y", locale = "en"),
+    date_breaks = "2 months"
+  )
+
+
+
+
 
 
 # Comparing models - health region level

@@ -1,19 +1,20 @@
 ## APP backup
 
-library(dplyr)
+library(tidyverse)
 library(ggplot2)
 library(shiny)
 library(bslib)
 library(readxl)
 library(lubridate)
 library(renv)
+
 renv::init()
 
 # Reading Data and preparing it ----------------------------------
 
-supply <- vroom::vroom("~/GitHub/human_resource_health/03_hrh_model/data/supply.csv")
+supply <- vroom::vroom("data/supply.csv")
 
-phc_services <- read_excel("~/GitHub/human_resource_health/03_hrh_model/data/services_2025.xlsx") |> 
+phc_services <- read_excel("data/services_2025.xlsx") |> 
                   rename(health_region = regiao, date = data, 
                          sus_qtt = qtd, procedure = procedimento, 
                          month_performed = mês_procedimento_realizado, 
@@ -22,7 +23,7 @@ phc_services <- read_excel("~/GitHub/human_resource_health/03_hrh_model/data/ser
                          target_public = Público, 
                          level_service = nivel_atencao)
 
-procedures_professional <- read_excel("~/GitHub/human_resource_health/03_hrh_model/data/calendario-procedimentos.xlsx", 
+procedures_professional <- read_excel("data/calendario-procedimentos.xlsx", 
                                       sheet = "procedimentos_profissionais") |> 
   select(codigo_sigtap, categoria, CBO) |> 
   mutate(codigo_sigtap = as.numeric(codigo_sigtap)) 
@@ -35,7 +36,7 @@ qtt_professional <-
                        codigo_sigtap == '101010010' ~ n/2,
                        TRUE ~ n))
 
-sisab <- read_excel("~/GitHub/human_resource_health/03_hrh_model/data/producao_SISAB.xls") |> 
+sisab <- read_excel("data/producao_SISAB.xls") |> 
   select(Cod_Regiao_Saude, Porcentagem)
 
 
